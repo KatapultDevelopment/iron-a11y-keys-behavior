@@ -11,44 +11,28 @@ found at http://polymer.github.io/PATENTS.txt
 import '@polymer/polymer/polymer-legacy.js';
 
 /**
- * Chrome uses an older version of DOM Level 3 Keyboard Events
- *
- * Most keys are labeled as text, but some are Unicode codepoints.
- * Values taken from:
- * http://www.w3.org/TR/2007/WD-DOM-Level-3-Events-20071221/keyset.html#KeySet-Set
- */
-var KEY_IDENTIFIER = {
-  'U+0008': 'backspace',
-  'U+0009': 'tab',
-  'U+001B': 'esc',
-  'U+0020': 'space',
-  'U+007F': 'del'
-};
-
-/**
- * Special table for KeyboardEvent.keyCode.
- * KeyboardEvent.keyIdentifier is better, and KeyBoardEvent.key is even better
- * than that.
+ * Special table for KeyboardEvent.code to convert values to key characters
  *
  * Values from:
- * https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent.keyCode#Value_of_keyCode
+ * https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values
  */
-var KEY_CODE = {
-  8: 'backspace',
-  9: 'tab',
-  13: 'enter',
-  27: 'esc',
-  33: 'pageup',
-  34: 'pagedown',
-  35: 'end',
-  36: 'home',
-  32: 'space',
-  37: 'left',
-  38: 'up',
-  39: 'right',
-  40: 'down',
-  46: 'del',
-  106: '*'
+var CODE_MAPPING = {
+  'minus': '-',
+  'equal': '=',
+  'bracketleft': '[',
+  'bracketright': ']',
+  'semicolon': ';',
+  'quote': "'",
+  'backquote': '`',
+  'backslash': '\\',
+  'comma': ',',
+  'period': '.',
+  'slash': '/',
+  'multiply': '*',
+  'subtract': '-',
+  'add': '+',
+  'decimal': '.',
+  'divide': '/'
 };
 
 /**
@@ -64,18 +48,9 @@ var MODIFIER_KEYS = {
 };
 
 /**
- * KeyboardEvent.key is mostly represented by printable character made by
- * the keyboard, with unprintable keys labeled nicely.
- *
- * However, on OS X, Alt+char can make a Unicode character that follows an
- * Apple-specific mapping. In this case, we fall back to .keyCode.
+ * Matches alphanumeric characters
  */
-var KEY_CHAR = /[a-z0-9*]/;
-
-/**
- * Matches a keyIdentifier string.
- */
-var IDENT_CHAR = /U\+/;
+var ALPHANUMERIC = /[a-z0-9*]/;
 
 /**
  * Matches arrow keys in Gecko 27.0+
@@ -97,67 +72,25 @@ var ESC_KEY = /^escape$/;
 
 /**
  * Transforms the key.
- * @param {string} key The KeyBoardEvent.key
- * @param {Boolean} [noSpecialChars] Limits the transformation to
+ * @param {string} key The KeyBoardEvent.code
  * alpha-numeric characters.
  */
 function transformKey(key, noSpecialChars) {
   var validKey = '';
   if (key) {
-    var lKey = key.toLowerCase();
+    // Replace proceeding "Key", "Digit", and "Numpad" and then convert to lowercase
+    var lKey = key.replace(/^(Key|Digit|Numpad)/, '').toLowerCase();
     if (lKey === ' ' || SPACE_KEY.test(lKey)) {
       validKey = 'space';
     } else if (ESC_KEY.test(lKey)) {
       validKey = 'esc';
-    } else if (lKey.length == 1) {
-      if (!noSpecialChars || KEY_CHAR.test(lKey)) {
-        validKey = lKey;
-      }
+    } else if (lKey.length == 1 && ALPHANUMERIC.test(lKey)) {
+      validKey = lKey;
     } else if (ARROW_KEY.test(lKey)) {
       validKey = lKey.replace('arrow', '');
-    } else if (lKey == 'multiply') {
-      // numpad '*' can map to Multiply on IE/Windows
-      validKey = '*';
     } else {
-      validKey = lKey;
-    }
-  }
-  return validKey;
-}
-
-function transformKeyIdentifier(keyIdent) {
-  var validKey = '';
-  if (keyIdent) {
-    if (keyIdent in KEY_IDENTIFIER) {
-      validKey = KEY_IDENTIFIER[keyIdent];
-    } else if (IDENT_CHAR.test(keyIdent)) {
-      keyIdent = parseInt(keyIdent.replace('U+', '0x'), 16);
-      validKey = String.fromCharCode(keyIdent).toLowerCase();
-    } else {
-      validKey = keyIdent.toLowerCase();
-    }
-  }
-  return validKey;
-}
-
-function transformKeyCode(keyCode) {
-  var validKey = '';
-  if (Number(keyCode)) {
-    if (keyCode >= 65 && keyCode <= 90) {
-      // ascii a-z
-      // lowercase is 32 offset from uppercase
-      validKey = String.fromCharCode(32 + keyCode);
-    } else if (keyCode >= 112 && keyCode <= 123) {
-      // function keys f1-f12
-      validKey = 'f' + (keyCode - 112 + 1);
-    } else if (keyCode >= 48 && keyCode <= 57) {
-      // top 0-9 keys
-      validKey = String(keyCode - 48);
-    } else if (keyCode >= 96 && keyCode <= 105) {
-      // num pad 0-9
-      validKey = String(keyCode - 96);
-    } else {
-      validKey = KEY_CODE[keyCode];
+      // Try to map the key with CODE_MAPPING or fall back to the key
+      validKey = CODE_MAPPING[lKey] || lKey;
     }
   }
   return validKey;
@@ -166,35 +99,24 @@ function transformKeyCode(keyCode) {
 /**
  * Calculates the normalized key for a KeyboardEvent.
  * @param {KeyboardEvent} keyEvent
- * @param {Boolean} [noSpecialChars] Set to true to limit keyEvent.key
- * transformation to alpha-numeric chars. This is useful with key
- * combinations like shift + 2, which on FF for MacOS produces
- * keyEvent.key = @
- * To get 2 returned, set noSpecialChars = true
- * To get @ returned, set noSpecialChars = false
  */
-function normalizedKeyForEvent(keyEvent, noSpecialChars) {
-  // Fall back from .key, to .detail.key for artifical keyboard events,
-  // and then to deprecated .keyIdentifier and .keyCode.
-  if (keyEvent.key) {
-    return transformKey(keyEvent.key, noSpecialChars);
+function normalizedKeyForEvent(keyEvent) {
+  // Fall back from .code, to .detail.code for artifical keyboard events,
+  if (keyEvent.code) {
+    return transformKey(keyEvent.code);
   }
-  if (keyEvent.detail && keyEvent.detail.key) {
-    return transformKey(keyEvent.detail.key, noSpecialChars);
+  if (keyEvent.detail && keyEvent.detail.code) {
+    return transformKey(keyEvent.detail.code);
   }
-  return transformKeyIdentifier(keyEvent.keyIdentifier) ||
-      transformKeyCode(keyEvent.keyCode) || '';
 }
 
 function keyComboMatchesEvent(keyCombo, event) {
-  // For combos with modifiers we support only alpha-numeric keys
-  var keyEvent = normalizedKeyForEvent(event, keyCombo.hasModifiers);
+  var keyEvent = normalizedKeyForEvent(event);
   return keyEvent === keyCombo.key &&
-      (!keyCombo.hasModifiers ||
        (!!event.shiftKey === !!keyCombo.shiftKey &&
         !!event.ctrlKey === !!keyCombo.ctrlKey &&
         !!event.altKey === !!keyCombo.altKey &&
-        !!event.metaKey === !!keyCombo.metaKey));
+        !!event.metaKey === !!keyCombo.metaKey);
 }
 
 function parseKeyComboString(keyComboString) {
@@ -311,17 +233,14 @@ export const IronA11yKeysBehavior = {
    */
   keyBindings: {},
 
-  /** @override */
   registered: function() {
     this._prepKeyBindings();
   },
 
-  /** @override */
   attached: function() {
     this._listenKeyEventListeners();
   },
 
-  /** @override */
   detached: function() {
     this._unlistenKeyEventListeners();
   },
